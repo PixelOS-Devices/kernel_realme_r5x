@@ -146,16 +146,9 @@ static int two_hundred = 200;
 
 static int one_hundred = 100;
 static int one_thousand = 1000;
-#ifdef CONFIG_SCHED_WALT
-static int two_million = 2000000;
-#endif
 #ifdef CONFIG_INCREASE_MAXIMUM_SWAPPINESS
 static int max_swappiness = 200;
 #endif
-#ifdef VENDOR_EDIT
-/*Huacai.Zhou@PSW.BSP.Kernel.Performance, 2018-04-28, add foreground task io opt*/
-unsigned int sysctl_fg_io_opt = 1;
-#endif /*VENDOR_EDIT*/
 
 //#ifdef COLOROS_EDIT
 /*Tiren.Ma@ROM.Framework, 2019-12-10, add for improving ed task migration*/
@@ -171,6 +164,9 @@ unsigned int ext4_fsync_enable_status = 0;
 /*jason.tang@TECH.BSP.Kernel.Storage, 2019-05-20, add to count flush*/
 unsigned long sysctl_blkdev_issue_flush_count = 0;
 #endif /*VENDOR_EDIT*/
+
+/*dylanchang, 2019/4/30, add foreground task io opt*/
+unsigned int sysctl_fg_io_opt = 1;
 
 #ifdef CONFIG_PRINTK
 static int ten_thousand = 10000;
@@ -463,16 +459,6 @@ static struct ctl_table kern_table[] = {
 		.extra1		= &zero,
 		.extra2		= &one_thousand,
 	},
-	{
-		.procname	= "sched_little_cluster_coloc_fmin_khz",
-		.data		= &sysctl_sched_little_cluster_coloc_fmin_khz,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= sched_little_cluster_coloc_fmin_khz_handler,
-		.extra1		= &zero,
-		.extra2		= &two_million,
-	},
-
 	{
 		.procname       = "sched_asym_cap_sibling_freq_match_pct",
 		.data           = &sysctl_sched_asym_cap_sibling_freq_match_pct,
