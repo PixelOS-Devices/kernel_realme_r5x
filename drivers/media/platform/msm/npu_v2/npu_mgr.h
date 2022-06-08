@@ -1,4 +1,4 @@
-/* Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -135,15 +135,21 @@ struct npu_host_ctx {
 	uint32_t err_irq_sts;
 	uint32_t wdg_irq_sts;
 	bool fw_error;
+	bool dev_shuttingdown;
 	bool cancel_work;
 	bool app_crashed;
 	struct notifier_block nb;
 	struct notifier_block panic_nb;
+	struct notifier_block reboot_nb;
 	void *notif_hdle;
 	spinlock_t bridge_mbox_lock;
 	bool bridge_mbox_pwr_on;
 	void *ipc_msg_buf;
 	struct list_head misc_cmd_list;
+
+	struct msm_npu_property fw_caps;
+	bool fw_caps_valid;
+	uint32_t fw_caps_err_code;
 };
 
 struct npu_device;

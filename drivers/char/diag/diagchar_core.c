@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2017,13 +2017,15 @@ static int diag_switch_logging(struct diag_logging_mode_param_t *param)
 				driver->pcie_switch_pid = current->tgid;
 			}
 			if (new_mode == DIAG_PCIE_MODE) {
-				driver->transport_set = DIAG_ROUTE_TO_PCIE;
+				driver->transport_set =
+					DIAG_ROUTE_TO_PCIE;
 				diagmem_setsize(POOL_TYPE_MUX_APPS,
 					itemsize_pcie_apps,
 					(poolsize_pcie_apps + 1 +
 						(NUM_PERIPHERALS * 6)));
 			} else if (new_mode == DIAG_USB_MODE) {
-				driver->transport_set = DIAG_ROUTE_TO_USB;
+				driver->transport_set =
+					DIAG_ROUTE_TO_USB;
 				diagmem_setsize(POOL_TYPE_MUX_APPS,
 					itemsize_usb_apps,
 					(poolsize_usb_apps + 1 +
@@ -4313,7 +4315,7 @@ static void diag_debug_init(void)
 	 * to be logged to IPC
 	 */
 	diag_debug_mask = DIAG_DEBUG_PERIPHERALS | DIAG_DEBUG_DCI |
-				DIAG_DEBUG_USERSPACE | DIAG_DEBUG_BRIDGE;
+		DIAG_DEBUG_USERSPACE | DIAG_DEBUG_BRIDGE | DIAG_DEBUG_MUX;
 }
 #else
 static void diag_debug_init(void)
@@ -4422,7 +4424,7 @@ static void diag_init_transport(void)
 	 * The number of buffers encompasses Diag data generated on
 	 * the Apss processor + 1 for the responses generated
 	 * exclusively on the Apps processor + data from data channels
-	 *(4 channels periperipheral) + data from command channels (2)
+	 *(4 channels per peripheral) + data from command channels (2)
 	 */
 	diagmem_setsize(POOL_TYPE_MUX_APPS, itemsize_pcie_apps,
 		poolsize_pcie_apps + 1 + (NUM_PERIPHERALS * 6));
@@ -4441,12 +4443,39 @@ static void diag_init_transport(void)
 	 * The number of buffers encompasses Diag data generated on
 	 * the Apss processor + 1 for the responses generated
 	 * exclusively on the Apps processor + data from data channels
-	 *(4 channels periperipheral) + data from command channels (2)
+	 *(4 channels per peripheral) + data from command channels (2)
 	 */
 	diagmem_setsize(POOL_TYPE_MUX_APPS, itemsize_usb_apps,
 		poolsize_usb_apps + 1 + (NUM_PERIPHERALS * 6));
 }
 #endif
+
+static void diag_init_locks(void)
+{
+	int i = 0;
+
+	spin_lock_init(&driver->rsp_buf_busy_lock);
+
+	mutex_init(&driver->hdlc_disable_mutex);
+	mutex_init(&driver->diagchar_mutex);
+	mutex_init(&driver->diag_notifier_mutex);
+	mutex_init(&driver->diag_file_mutex);
+	mutex_init(&driver->delayed_rsp_mutex);
+	mutex_init(&apps_data_mutex);
+	mutex_init(&driver->msg_mask_lock);
+	mutex_init(&driver->hdlc_recovery_mutex);
+	mutex_init(&driver->diag_id_mutex);
+	mutex_init(&driver->diag_hdlc_mutex);
+	mutex_init(&driver->diag_cntl_mutex);
+	mutex_init(&driver->mode_lock);
+	mutex_init(&driver->cmd_reg_mutex);
+
+	for (i = 0; i < NUM_PERIPHERALS; i++) {
+		mutex_init(&driver->diagfwd_channel_mutex[i]);
+		mutex_init(&driver->rpmsginfo_mutex[i]);
+	}
+}
+
 static int __init diagchar_init(void)
 {
 	dev_t dev;
@@ -4460,6 +4489,7 @@ static int __init diagchar_init(void)
 	kmemleak_not_leak(driver);
 
 	timer_in_progress = 0;
+	diag_init_locks();
 	diag_init_transport();
 	DIAG_LOG(DIAG_DEBUG_MUX, "Transport type set to %d\n",
 		driver->transport_set);
@@ -4495,19 +4525,12 @@ static int __init diagchar_init(void)
 	non_hdlc_data.len = 0;
 	non_hdlc_data.allocated = 0;
 	non_hdlc_data.flushed = 0;
-	mutex_init(&driver->hdlc_disable_mutex);
-	mutex_init(&driver->diagchar_mutex);
-	mutex_init(&driver->diag_notifier_mutex);
-	mutex_init(&driver->diag_file_mutex);
-	mutex_init(&driver->delayed_rsp_mutex);
-	mutex_init(&apps_data_mutex);
-	mutex_init(&driver->msg_mask_lock);
-	mutex_init(&driver->hdlc_recovery_mutex);
-	for (i = 0; i < NUM_PERIPHERALS; i++) {
-		mutex_init(&driver->diagfwd_channel_mutex[i]);
-		mutex_init(&driver->rpmsginfo_mutex[i]);
+	for (i = 0; i < NUM_PERIPHERALS; i++)
 		driver->diag_id_sent[i] = 0;
-	}
+
+	INIT_LIST_HEAD(&driver->diag_id_list);
+	INIT_LIST_HEAD(&driver->cmd_reg_list);
+
 	init_waitqueue_head(&driver->wait_q);
 	INIT_WORK(&(driver->diag_drain_work), diag_drain_work_fn);
 	INIT_WORK(&(driver->update_user_clients),
@@ -4574,8 +4597,6 @@ static int __init diagchar_init(void)
 	ret = diagchar_setup_cdev(dev);
 	if (ret)
 		goto fail;
-	mutex_init(&driver->diag_id_mutex);
-	INIT_LIST_HEAD(&driver->diag_id_list);
 	diag_add_diag_id_to_list(DIAG_ID_APPS, "APPS", APPS_DATA, APPS_DATA);
 	pr_debug("diagchar initialized now");
 	if (IS_ENABLED(CONFIG_DIAGFWD_BRIDGE_CODE))

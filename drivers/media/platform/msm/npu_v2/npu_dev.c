@@ -1,4 +1,4 @@
-/* Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -259,14 +259,32 @@ static ssize_t pwr_store(struct device *dev,
 					  const char *buf, size_t count)
 {
 	struct npu_device *npu_dev = dev_get_drvdata(dev);
+	struct npu_pwrctrl *pwr = &npu_dev->pwrctrl;
 	bool pwr_on = false;
 
 	if (strtobool(buf, &pwr_on) < 0)
 		return -EINVAL;
 
+	mutex_lock(&npu_dev->dev_lock);
 	if (pwr_on) {
-		if (npu_enable_core_power(npu_dev))
+		pwr->pwr_vote_num_sysfs++;
+	} else {
+		if (!pwr->pwr_vote_num_sysfs) {
+			NPU_WARN("Invalid unvote from sysfs\n");
+			mutex_unlock(&npu_dev->dev_lock);
+			return -EINVAL;
+		}
+		pwr->pwr_vote_num_sysfs--;
+	}
+	mutex_unlock(&npu_dev->dev_lock);
+
+	if (pwr_on) {
+		if (npu_enable_core_power(npu_dev)) {
+			mutex_lock(&npu_dev->dev_lock);
+			pwr->pwr_vote_num_sysfs--;
+			mutex_unlock(&npu_dev->dev_lock);
 			return -EPERM;
+		}
 	} else {
 		npu_disable_core_power(npu_dev);
 	}
@@ -1346,12 +1364,6 @@ static int npu_set_fw_state(struct npu_client *client, uint32_t enable)
 	struct npu_host_ctx *host_ctx = &npu_dev->host_ctx;
 	int rc = 0;
 
-	if (host_ctx->network_num > 0) {
-		NPU_ERR("Need to unload network first\n");
-		mutex_unlock(&npu_dev->dev_lock);
-		return -EINVAL;
-	}
-
 	if (enable) {
 		NPU_DBG("enable fw\n");
 		rc = enable_fw(npu_dev);
@@ -1361,9 +1373,6 @@ static int npu_set_fw_state(struct npu_client *client, uint32_t enable)
 			host_ctx->npu_init_cnt++;
 			NPU_DBG("npu_init_cnt %d\n",
 				host_ctx->npu_init_cnt);
-			/* set npu to lowest power level */
-			if (npu_set_uc_power_level(npu_dev, 1))
-				NPU_WARN("Failed to set uc power level\n");
 		}
 	} else if (host_ctx->npu_init_cnt > 0) {
 		NPU_DBG("disable fw\n");
@@ -1456,11 +1465,13 @@ static int npu_get_property(struct npu_client *client,
 	case MSM_NPU_PROP_ID_DRV_FEATURE:
 		prop.prop_param[0] = MSM_NPU_FEATURE_MULTI_EXECUTE |
 			MSM_NPU_FEATURE_ASYNC_EXECUTE;
+		if (npu_dev->npu_dsp_sid_mapped)
+			prop.prop_param[0] |= MSM_NPU_FEATURE_DSP_SID_MAPPED;
 		break;
 	default:
 		ret = npu_host_get_fw_property(client->npu_dev, &prop);
 		if (ret) {
-			NPU_ERR("npu_host_set_fw_property failed\n");
+			NPU_ERR("npu_host_get_fw_property failed\n");
 			return ret;
 		}
 		break;
@@ -1732,7 +1743,7 @@ int npu_set_bw(struct npu_device *npu_dev, int new_ib, int new_ab)
 static int npu_adjust_max_power_level(struct npu_device *npu_dev)
 {
 	struct npu_pwrctrl *pwr = &npu_dev->pwrctrl;
-	uint32_t fmax_reg_value, fmax, fmax_pwrlvl;
+	uint32_t fmax_reg_value, fmax, fmax_pwrlvl = pwr->max_pwrlevel;
 	struct npu_pwrlevel *level;
 	int i, j;
 
@@ -2224,6 +2235,10 @@ static int npu_hw_info_init(struct npu_device *npu_dev)
 	NPU_DBG("NPU_HW_VERSION 0x%x\n", npu_dev->hw_version);
 	npu_disable_core_power(npu_dev);
 
+	npu_dev->npu_dsp_sid_mapped =
+		of_property_read_bool(npu_dev->pdev->dev.of_node,
+		"qcom,npu-dsp-sid-mapped");
+
 	return rc;
 }
 
@@ -2429,9 +2444,7 @@ static int npu_probe(struct platform_device *pdev)
 		goto error_res_init;
 	}
 
-	rc = npu_debugfs_init(npu_dev);
-	if (rc)
-		goto error_driver_init;
+	npu_debugfs_init(npu_dev);
 
 	npu_dev->smmu_ctx.attach_cnt = 0;
 	npu_dev->smmu_ctx.mmu_mapping = arm_iommu_create_mapping(

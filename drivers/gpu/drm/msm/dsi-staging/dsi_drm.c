@@ -270,6 +270,7 @@ static void dsi_bridge_enable(struct drm_bridge *bridge)
 			sde_connector_schedule_status_work(display->drm_conn,
 				true);
 	}
+
 	#ifdef VENDOR_EDIT
 	//liwei.a@PSW.MM.Display.Stability, 2019/07/12, add interface for tp to get lcd status resumed or not
 	lcd_running_tag = 0;
