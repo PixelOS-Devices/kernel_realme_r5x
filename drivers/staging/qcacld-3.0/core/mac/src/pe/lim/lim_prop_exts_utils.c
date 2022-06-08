@@ -232,6 +232,7 @@ lim_extract_ap_capability(tpAniSirGlobal mac_ctx, uint8_t *p_ie,
 	uint8_t vht_ch_wd;
 	uint8_t center_freq_diff;
 	struct s_ext_cap *ext_cap;
+	struct ch_params ch_params = {0};
 
 	beacon_struct = qdf_mem_malloc(sizeof(tSirProbeRespBeacon));
 	if (NULL == beacon_struct) {
@@ -311,6 +312,9 @@ lim_extract_ap_capability(tpAniSirGlobal mac_ctx, uint8_t *p_ie,
 			else if (center_freq_diff > 16)
 				ap_bcon_ch_width =
 					WNI_CFG_VHT_CHANNEL_WIDTH_80_PLUS_80MHZ;
+			else
+				ap_bcon_ch_width =
+					WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ;
 		}
 
 		fw_vht_ch_wd = wma_get_vht_ch_width();
@@ -363,20 +367,24 @@ lim_extract_ap_capability(tpAniSirGlobal mac_ctx, uint8_t *p_ie,
 				 */
 				vht_ch_wd = WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ;
 				session->ch_center_freq_seg1 = 0;
-			}
-		} else if (vht_ch_wd == WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ) {
-			/* DUT or AP supports only 80MHz */
-			if (ap_bcon_ch_width ==
-					WNI_CFG_VHT_CHANNEL_WIDTH_160MHZ &&
-					!new_ch_width_dfn)
-				/* AP is in 160MHz mode */
 				session->ch_center_freq_seg0 =
 					lim_get_80Mhz_center_channel(
 						beacon_struct->channelNumber);
-			else
-				session->ch_center_freq_seg1 = 0;
+			}
+		} else if (vht_ch_wd == WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ) {
+			session->ch_center_freq_seg0 =
+					lim_get_80Mhz_center_channel(
+						beacon_struct->channelNumber);
+			session->ch_center_freq_seg1 = 0;
 		}
-		session->ch_width = vht_ch_wd + 1;
+		ch_params.ch_width = vht_ch_wd + 1;
+		wlan_reg_set_channel_params(mac_ctx->pdev,
+					    session->currentOperChannel,
+					    0, &ch_params);
+		session->ch_width = ch_params.ch_width;
+		session->ch_center_freq_seg0 = ch_params.center_freq_seg0;
+		session->ch_center_freq_seg1 = ch_params.center_freq_seg1;
+
 		if (CH_WIDTH_80MHZ < session->ch_width) {
 			session->vht_config.su_beam_former = 0;
 			session->nss = 1;
